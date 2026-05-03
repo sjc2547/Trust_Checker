@@ -4,7 +4,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const VERSION = '0.1.0';
-const DEFAULT_TARGET_URL = 'http://127.0.0.1:3106/app?_forceEmail=1';
+const DEFAULT_TARGET_URL = 'https://www.qingxiflow.com/app';
 const DEFAULT_OUTPUT_ROOT = path.join(__dirname, 'artifacts');
 const DEFAULT_VIEWPORT = { width: 1440, height: 960 };
 const DEFAULT_CAPTURE_INTERVAL_MS = 1000;

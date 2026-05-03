@@ -35,7 +35,7 @@ Each audit session creates a timestamped folder under `docs/Trust_Checker/artifa
 
 ### 1. Install dependencies
 
-From this `docs/Trust_Checker` directory:
+From this `Trust_Checker` directory:
 
 ```bash
 npm install
@@ -50,7 +50,7 @@ On macOS, when Chrome is launched in normal interactive mode, video capture is d
 ### 2. CLI mode
 
 ```bash
-npm run trust:checker -- --url http://127.0.0.1:3106/app?_forceEmail=1
+npm run trust:checker -- --url https://qingxiflow.com/app
 ```
 
 Flow:
@@ -65,7 +65,7 @@ Useful flags:
 
 ```bash
   node "./trust-checker.js" \
-  --url https://www.qingxiflow.com/app?_forceEmail=1 \
+  --url https://www.qingxiflow.com/app \
   --outputRoot "./artifacts" \
   --chromePath "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 ```
