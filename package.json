@@ -1,0 +1,30 @@
+{
+  "name": "qingxiflow-trust-checker",
+  "version": "0.1.0",
+  "description": "Standalone audit tool for verifying QingxiFlow file processing behavior in the browser.",
+  "private": true,
+  "bin": {
+    "qingxiflow-trust-checker": "./trust-checker.js",
+    "qingxiflow-trust-checker-gui": "./trust-checker-gui.js"
+  },
+  "scripts": {
+    "trust:checker": "node ./trust-checker.js",
+    "trust:checker:gui": "node ./trust-checker-gui.js",
+    "trust:checker:release": "node ./build-release.js"
+  },
+  "files": [
+    "./trust-checker-core.js",
+    "./trust-checker.js",
+    "./trust-checker-gui.js",
+    "./build-release.js",
+    "./README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "minimist": "^1.2.8",
+    "puppeteer-core": "^24.42.0"
+  }
+}
