@@ -56,7 +56,7 @@ npm run trust:checker -- --url https://qingxiflow.com/app
 Flow:
 
 1. Trust Checker opens the target page in Chrome and starts the audit window immediately by default.
-2. Upload a file and process it in QingxiFlow / 清晰Flow.
+2. Upload a file and process it in QingxiFlow.
 3. Press Enter to stop the audit and write the report.
 
 If you still want the old prepare-then-start flow for sign-in or setup, add `--manualStart`.
