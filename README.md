@@ -178,5 +178,5 @@ Non-technical users can start the GUI by double-clicking `Launch Trust Checker.c
 
 - Version: `0.1.0`
 - Core stack: `Node.js + Puppeteer Core + ffmpeg`
-- External naming: `QingxiFlow` in English, `清晰Flow` in Chinese, domain `qingxiflow.com`
+- External naming: `QingxiFlow` in English,domain `qingxiflow.com`
 - Scope: local audit evidence, not full endpoint reverse engineering
