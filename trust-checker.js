@@ -29,6 +29,9 @@ Options:
   --no-video     Disable video capture during the audit window
   --manualStart  Wait for Enter before starting the audit window
   --keepBrowser  Keep browser open after report generation
+  --trustedDomains   Comma-separated or repeated trusted third-party domains
+  --highRiskDomains  Comma-separated or repeated high-risk third-party domains
+  --ignoreFile       Path to a custom audit-ignore.json (default: ref/audit-ignore.json)
   --help         Show this help
 `);
 }
@@ -43,9 +46,18 @@ function waitForEnter(prompt) {
   });
 }
 
+function parseDomainListArg(value) {
+  if (!value) return [];
+  const items = Array.isArray(value) ? value : [value];
+  return items
+    .flatMap((item) => String(item || '').split(','))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 async function main() {
   const args = minimist(process.argv.slice(2), {
-    string: ['url', 'outputRoot', 'chromePath'],
+    string: ['url', 'outputRoot', 'chromePath', 'trustedDomains', 'highRiskDomains', 'ignoreFile'],
     boolean: ['headless', 'help', 'keepBrowser', 'video'],
     default: {
       url: DEFAULT_TARGET_URL,
@@ -68,6 +80,9 @@ async function main() {
     slowMo: args.slowMo,
     keepBrowserOpen: args.keepBrowser,
     recordVideo: typeof args.video === 'boolean' ? args.video : undefined,
+    trustedThirdPartyDomains: parseDomainListArg(args.trustedDomains),
+    highRiskThirdPartyDomains: parseDomainListArg(args.highRiskDomains),
+    ignoreFile: args.ignoreFile || null,
   });
 
   const cleanup = async () => {

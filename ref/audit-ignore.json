@@ -1,0 +1,70 @@
+{
+  "_comment": [
+    "audit-ignore.json — configurable control-plane exclusion rules for Trust Checker.",
+    "Edit this file to add/remove paths without touching any source code.",
+    "All four arrays are optional. Missing or null entries are skipped silently.",
+    "",
+    "exactPaths      : exact pathname matches (case-sensitive, leading slash required)",
+    "prefixPaths     : pathname prefix matches (request path must start with this value)",
+    "urlPatterns     : regex patterns matched against the full request URL (JS regex syntax, no flags needed)",
+    "trustedThirdPartyDomains : external domains treated as trusted infra (fonts, CDN, etc.)",
+    "highRiskThirdPartyDomains: external domains to flag when they carry substantial payloads",
+    "",
+    "NOTE: /cdn-cgi/* already covers Cloudflare services including Turnstile (human verification),",
+    "      RUM (Real User Monitoring), and other CDN features."
+  ],
+
+  "exactPaths": [
+    "/api/auth/me",
+    "/api/demo/capability",
+    "/api/analytics/events",
+    "/api/health",
+    "/api/version",
+    "/api/payment/config",
+    "/api/license/public-key",
+    "/api/auth/public-key",
+    "/api/auth/region",
+    "/api/auth/captcha",
+    "/api/audit-logs",
+    "/api/enterprise-interest",
+    "/api/enterprise-interests",
+    "/api/beta/login",
+    "/api/beta/reserve",
+    "/cdn-cgi/rum"
+  ],
+
+  "prefixPaths": [
+    "/api/auth/",
+    "/api/license/",
+    "/api/payment/",
+    "/api/export/",
+    "/api/import/",
+    "/api/audit-logs/",
+    "/api/download/",
+    "/api/scenarios",
+    "/cdn-cgi/"
+  ],
+
+  "urlPatterns": [],
+
+  "trustedThirdPartyDomains": [
+    "fonts.googleapis.com",
+    "fonts.gstatic.com",
+    "embed.tawk.to",
+    "va.tawk.to",
+    "vsb76.tawk.to",
+    "cdn.jsdelivr.net"
+  ],
+
+  "highRiskThirdPartyDomains": [
+    "sentry.io",
+    "ingest.sentry.io",
+    "google-analytics.com",
+    "googletagmanager.com",
+    "mixpanel.com",
+    "segment.com",
+    "amplitude.com",
+    "hotjar.com",
+    "fullstory.com"
+  ]
+}

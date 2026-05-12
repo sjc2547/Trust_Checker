@@ -8,26 +8,99 @@ const DEFAULT_TARGET_URL = 'https://www.qingxiflow.com/app';
 const DEFAULT_OUTPUT_ROOT = path.join(__dirname, 'artifacts');
 const DEFAULT_VIEWPORT = { width: 1440, height: 960 };
 const DEFAULT_CAPTURE_INTERVAL_MS = 1000;
+const DEFAULT_SUSPICIOUS_BODY_BYTES = 1024;
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
-const IGNORED_LOCAL_API_PATHS = new Set([
+const DEFAULT_HIGH_RISK_THIRD_PARTY_DOMAINS = [
+  'sentry.io',
+  'ingest.sentry.io',
+  'google-analytics.com',
+  'googletagmanager.com',
+  'mixpanel.com',
+  'segment.com',
+  'amplitude.com',
+  'hotjar.com',
+  'fullstory.com',
+];
+// Default ignore rules (control-plane paths that don't involve file processing).
+// These are the built-in baselines; audit-ignore.json extends them at runtime.
+const BUILTIN_IGNORE_EXACT_PATHS = new Set([
   '/api/auth/me',
   '/api/demo/capability',
   '/api/analytics/events',
+  '/api/health',
+  '/api/version',
+  '/api/payment/config',
+  '/api/license/public-key',
+  '/api/auth/public-key',
+  '/api/auth/region',
+  '/api/auth/captcha',
+  '/api/audit-logs',
+  '/api/enterprise-interest',
+  '/api/enterprise-interests',
+  '/api/beta/login',
+  '/api/beta/reserve',
+  '/cdn-cgi/rum',
 ]);
-const IGNORED_LOCAL_API_PREFIXES = [
+const BUILTIN_IGNORE_PREFIXES = [
   '/api/auth/',
   '/api/license/',
+  '/api/payment/',
+  '/api/export/',
+  '/api/import/',
+  '/api/audit-logs/',
+  '/cdn-cgi/',
 ];
-const IGNORED_LOCAL_API_EXACT = new Set([
-  '/api/beta/login',
-]);
 
-function isIgnoredControlPlanePath(pathname) {
-  if (!pathname) return false;
-  if (IGNORED_LOCAL_API_PATHS.has(pathname) || IGNORED_LOCAL_API_EXACT.has(pathname)) {
-    return true;
+const DEFAULT_IGNORE_FILE_PATH = path.join(__dirname, 'ref', 'audit-ignore.json');
+
+function loadIgnoreRules(ignoreFilePath) {
+  const filePath = ignoreFilePath || DEFAULT_IGNORE_FILE_PATH;
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return {
+      exactPaths: Array.isArray(parsed.exactPaths) ? parsed.exactPaths.filter(Boolean) : [],
+      prefixPaths: Array.isArray(parsed.prefixPaths) ? parsed.prefixPaths.filter(Boolean) : [],
+      urlPatterns: Array.isArray(parsed.urlPatterns)
+        ? parsed.urlPatterns.filter(Boolean).map((p) => {
+            try { return new RegExp(p); } catch (_) { return null; }
+          }).filter(Boolean)
+        : [],
+      trustedThirdPartyDomains: Array.isArray(parsed.trustedThirdPartyDomains)
+        ? parsed.trustedThirdPartyDomains.filter(Boolean)
+        : [],
+      highRiskThirdPartyDomains: Array.isArray(parsed.highRiskThirdPartyDomains)
+        ? parsed.highRiskThirdPartyDomains.filter(Boolean)
+        : [],
+      _source: filePath,
+    };
+  } catch (_) {
+    return { exactPaths: [], prefixPaths: [], urlPatterns: [], trustedThirdPartyDomains: [], highRiskThirdPartyDomains: [], _source: null };
   }
-  return IGNORED_LOCAL_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
+function mergeIgnoreRules(fileRules = {}) {
+  const exactPaths = new Set([
+    ...BUILTIN_IGNORE_EXACT_PATHS,
+    ...(fileRules.exactPaths || []),
+  ]);
+  const prefixPaths = [
+    ...BUILTIN_IGNORE_PREFIXES,
+    ...(fileRules.prefixPaths || []).filter((p) => !BUILTIN_IGNORE_PREFIXES.includes(p)),
+  ];
+  const urlPatterns = fileRules.urlPatterns || [];
+  return { exactPaths, prefixPaths, urlPatterns };
+}
+
+function isIgnoredControlPlanePath(pathname, fullUrl, rules) {
+  if (!pathname) return false;
+  const exact = rules ? rules.exactPaths : BUILTIN_IGNORE_EXACT_PATHS;
+  const prefixes = rules ? rules.prefixPaths : BUILTIN_IGNORE_PREFIXES;
+  const patterns = rules ? (rules.urlPatterns || []) : [];
+  if (exact.has(pathname)) return true;
+  if (prefixes.some((prefix) => pathname.startsWith(prefix))) return true;
+  if (fullUrl && patterns.length > 0 && patterns.some((re) => re.test(fullUrl))) return true;
+  return false;
 }
 
 function defaultRecordVideo({ headless }) {
@@ -37,6 +110,7 @@ function defaultRecordVideo({ headless }) {
 function checkTag(check) {
   if (check.status === 'pass') return '[PASS]';
   if (check.status === 'fail') return '[FAIL]';
+  if (check.status === 'warn') return '[WARN]';
   return '[INFO]';
 }
 
@@ -160,11 +234,83 @@ const INSTRUMENTATION_SOURCE = `
       return {
         beaconUrl: String(args[0] || ''),
         bodySize: Number(bodySize || 0),
+        bodyPreview: typeof body === 'string' ? body.slice(0, 1200) : null,
+      };
+    });
+  }
+
+  if (typeof FormData !== 'undefined' && FormData.prototype) {
+    wrap(FormData.prototype, 'append', 'form-data-append', function(args) {
+      const value = args[1];
+      const filename = typeof args[2] === 'string' ? args[2] : null;
+      const valueType = value && value.constructor ? value.constructor.name : typeof value;
+      const valueSize = value && typeof value.size === 'number'
+        ? Number(value.size)
+        : typeof value === 'string'
+          ? value.length
+          : value && typeof value.byteLength === 'number'
+            ? Number(value.byteLength)
+            : 0;
+      return {
+        fieldName: String(args[0] || ''),
+        valueType,
+        valueSize,
+        filename,
       };
     });
   }
 })();
 `;
+
+function normalizeDomainList(input) {
+  const values = Array.isArray(input) ? input : [input];
+  return values
+    .flatMap((item) => String(item || '').split(','))
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+    .map((item) => item.replace(/^https?:\/\//, '').replace(/\/$/, ''));
+}
+
+function domainMatches(hostname, domains) {
+  const host = String(hostname || '').toLowerCase();
+  if (!host) return false;
+  return domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+}
+
+function detectSensitivePayload(postDataText) {
+  const text = String(postDataText || '');
+  if (!text) return { hasSensitiveData: false, signals: [] };
+
+  const sensitivePatterns = [
+    { name: 'email', regex: /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i },
+    { name: 'cn-phone', regex: /(?:\+?86[-\s]?)?1[3-9]\d{9}/ },
+    { name: 'us-ssn', regex: /\b\d{3}-\d{2}-\d{4}\b/ },
+  ];
+
+  const signals = [];
+  for (const pattern of sensitivePatterns) {
+    if (pattern.regex.test(text)) signals.push(pattern.name);
+  }
+
+  const base64Candidates = text.match(/[A-Za-z0-9+/]{40,}={0,2}/g) || [];
+  for (const candidate of base64Candidates.slice(0, 3)) {
+    try {
+      const decoded = Buffer.from(candidate, 'base64').toString('utf8');
+      if (!decoded) continue;
+      const printableCount = (decoded.match(/[\x20-\x7E\n\r\t]/g) || []).length;
+      const printableRatio = printableCount / decoded.length;
+      if (printableRatio < 0.85) continue;
+      for (const pattern of sensitivePatterns) {
+        if (pattern.regex.test(decoded)) signals.push(`base64-${pattern.name}`);
+      }
+    } catch (_) {}
+  }
+
+  return {
+    hasSensitiveData: signals.length > 0,
+    signals: Array.from(new Set(signals)),
+  };
+}
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -307,6 +453,9 @@ function shortUrl(urlString) {
 function summarizeFileEvents(events) {
   const selected = [];
   const reads = [];
+  const objectUrls = [];
+  const formDataWrites = [];
+  const beacons = [];
   for (const event of events) {
     if (event.kind === 'file-selected' && Array.isArray(event.files)) {
       for (const file of event.files) selected.push(file);
@@ -314,42 +463,89 @@ function summarizeFileEvents(events) {
     if (String(event.kind || '').startsWith('file-reader') || String(event.kind || '').startsWith('blob-')) {
       reads.push(event);
     }
+    if (event.kind === 'create-object-url') objectUrls.push(event);
+    if (event.kind === 'form-data-append') formDataWrites.push(event);
+    if (event.kind === 'send-beacon') beacons.push(event);
   }
-  return { selected, reads };
+  return { selected, reads, objectUrls, formDataWrites, beacons };
 }
 
-function classifyRequest(item, targetOrigin) {
+function classifyRequest(item, targetOrigin, policy = {}) {
   const method = String(item.method || 'GET').toUpperCase();
   const headers = item.headers || {};
   const contentType = String(headers['content-type'] || headers['Content-Type'] || '').toLowerCase();
+  const fileRules = policy.ignoreRules ? mergeIgnoreRules(policy.ignoreRules) : null;
+  const trustedThirdPartyDomains = normalizeDomainList(
+    (policy.ignoreRules && policy.ignoreRules.trustedThirdPartyDomains && policy.ignoreRules.trustedThirdPartyDomains.length > 0)
+      ? [...(policy.trustedThirdPartyDomains || []), ...policy.ignoreRules.trustedThirdPartyDomains]
+      : (policy.trustedThirdPartyDomains || [])
+  );
+  const highRiskThirdPartyDomains = normalizeDomainList(
+    (policy.ignoreRules && policy.ignoreRules.highRiskThirdPartyDomains && policy.ignoreRules.highRiskThirdPartyDomains.length > 0)
+      ? policy.ignoreRules.highRiskThirdPartyDomains
+      : (policy.highRiskThirdPartyDomains || DEFAULT_HIGH_RISK_THIRD_PARTY_DOMAINS)
+  );
   let parsedUrl = null;
   try {
     parsedUrl = new URL(item.url);
   } catch (_) {}
   const resourceType = String(item.resourceType || '').toLowerCase();
   const pathname = parsedUrl ? parsedUrl.pathname : item.url;
+  const hostname = parsedUrl ? parsedUrl.hostname : '';
+  const queryLength = parsedUrl ? String(parsedUrl.search || '').length : 0;
   const hasBody = Number(item.postDataSize || 0) > 0;
   const isRemote = parsedUrl ? !isLocalHostname(parsedUrl.hostname) && parsedUrl.protocol !== 'file:' : false;
   const isTargetOrigin = parsedUrl && targetOrigin ? parsedUrl.origin === targetOrigin : false;
-  const isIgnoredLocalApi = Boolean(isTargetOrigin && isIgnoredControlPlanePath(pathname));
+  const isExternal = parsedUrl && targetOrigin ? parsedUrl.origin !== targetOrigin : isRemote;
+  const isTrustedThirdParty = isExternal && domainMatches(hostname, trustedThirdPartyDomains);
+  const isHighRiskThirdParty = isExternal && domainMatches(hostname, highRiskThirdPartyDomains);
+  const isIgnoredLocalApi = Boolean(isTargetOrigin && isIgnoredControlPlanePath(pathname, item.url, fileRules));
   const isApiEndpoint = pathname.includes('/api/');
-  const isRealtime = ['websocket', 'eventsource'].includes(resourceType);
-  const isApiLike = (isApiEndpoint || isRealtime) && !isIgnoredLocalApi;
+  const isRealtime = ['websocket', 'eventsource', 'websocket-frame'].includes(resourceType) || method === 'WS-SEND';
+  const isBeacon = resourceType === 'beacon' || method === 'BEACON';
   const hasUploadContentType = /multipart|octet-stream/.test(contentType);
   const hasMeaningfulBody = Number(item.postDataSize || 0) >= 256;
+  const hasLargeBody = Number(item.postDataSize || 0) >= DEFAULT_SUSPICIOUS_BODY_BYTES;
+  const payloadInsights = detectSensitivePayload(item.postDataSample || item.postDataPreview || '');
+  const isPotentialDataChannel =
+    ['xhr', 'fetch', 'websocket', 'eventsource', 'beacon', 'ping', 'websocket-frame'].includes(resourceType) ||
+    ['POST', 'PUT', 'PATCH', 'DELETE', 'CONNECT', 'BEACON', 'WS-SEND'].includes(method) ||
+    hasBody ||
+    queryLength >= 256;
+  const isApiLike = !isIgnoredLocalApi && (
+    isApiEndpoint ||
+    isRealtime ||
+    isBeacon ||
+    (isExternal && !isTrustedThirdParty && isPotentialDataChannel)
+  );
   const isUploadLike = !isIgnoredLocalApi && (
     hasUploadContentType ||
-    (isRemote && !['GET', 'HEAD', 'OPTIONS'].includes(method)) ||
-    (isApiEndpoint && !isRemote && (hasUploadContentType || hasMeaningfulBody))
+    (isRemote && ['POST', 'PUT', 'PATCH', 'DELETE', 'CONNECT', 'BEACON'].includes(method) && (hasBody || hasLargeBody)) ||
+    (method === 'WS-SEND' && hasBody) ||
+    (isApiEndpoint && !isRemote && (hasUploadContentType || hasMeaningfulBody)) ||
+    (isExternal && payloadInsights.hasSensitiveData)
+  );
+  const isHighRiskThirdPartyLeak = isHighRiskThirdParty && (
+    hasMeaningfulBody ||
+    queryLength >= 128 ||
+    method === 'BEACON' ||
+    method === 'WS-SEND'
   );
   return {
     method,
     pathname,
+    hostname,
+    queryLength,
     isApiLike,
     isUploadLike,
     isRemote,
+    isExternal,
     isTargetOrigin,
     isIgnoredLocalApi,
+    isTrustedThirdParty,
+    isHighRiskThirdParty,
+    isHighRiskThirdPartyLeak,
+    payloadInsights,
   };
 }
 
@@ -364,7 +560,11 @@ function buildVerdict({ targetUrl, auditStartAt, auditStopAt, requests, fileEven
 
   const requestDetails = requests.map((item) => ({
     ...item,
-    classification: classifyRequest(item, targetOrigin),
+    classification: classifyRequest(item, targetOrigin, {
+      trustedThirdPartyDomains: browserInfo?.trustedThirdPartyDomains,
+      highRiskThirdPartyDomains: browserInfo?.highRiskThirdPartyDomains,
+      ignoreRules: browserInfo?.ignoreRules,
+    }),
   }));
   const fileSummary = summarizeFileEvents(fileEvents);
   const firstFileSelectionAt = fileEvents
@@ -379,6 +579,7 @@ function buildVerdict({ targetUrl, auditStartAt, auditStopAt, requests, fileEven
   const apiCalls = requestWindow.filter((item) => item.classification.isApiLike);
   const uploadSuspects = requestWindow.filter((item) => item.classification.isUploadLike);
   const remoteWrites = uploadSuspects.filter((item) => item.classification.isRemote);
+  const highRiskLeakSuspects = requestWindow.filter((item) => item.classification.isHighRiskThirdPartyLeak);
 
   const checks = [
     {
@@ -402,12 +603,23 @@ function buildVerdict({ targetUrl, auditStartAt, auditStopAt, requests, fileEven
     {
       key: 'fileOnlyProcessedInBrowserMemory',
       label: 'File only processed in browser memory',
-      status: fileSummary.selected.length > 0 && fileSummary.reads.length > 0 && uploadSuspects.length === 0 ? 'pass' : 'inconclusive',
-      passed: fileSummary.selected.length > 0 && fileSummary.reads.length > 0 && uploadSuspects.length === 0,
+      status: (fileSummary.selected.length > 0 && fileSummary.reads.length > 0 && uploadSuspects.length === 0)
+        ? 'pass'
+        : (fileSummary.selected.length === 0 && uploadSuspects.length === 0 && apiCalls.length === 0)
+          ? 'pass'
+          : (fileSummary.selected.length > 0 && fileSummary.reads.length === 0 && fileSummary.objectUrls.length > 0 && uploadSuspects.length === 0)
+            ? 'warn'
+            : 'inconclusive',
+      passed: (fileSummary.selected.length > 0 && fileSummary.reads.length > 0 && uploadSuspects.length === 0)
+        || (fileSummary.selected.length === 0 && uploadSuspects.length === 0 && apiCalls.length === 0),
       detail: fileSummary.selected.length === 0
-        ? 'No file-selection event was captured, so this point is inconclusive.'
+        ? (uploadSuspects.length === 0 && apiCalls.length === 0)
+          ? 'No file-selection event was captured, but no upload or suspicious API calls were detected. (Using website example file is considered safe.)'
+          : 'No file-selection event was captured, and suspicious activity was detected.'
         : fileSummary.reads.length === 0
-          ? 'A file was selected, but no FileReader/Blob memory-read hook fired during the audit window.'
+          ? fileSummary.objectUrls.length > 0
+            ? 'A file was selected and URL.createObjectURL was observed, but no FileReader/Blob memory-read hook fired.'
+            : 'A file was selected, but no FileReader/Blob memory-read hook fired during the audit window.'
           : uploadSuspects.length === 0
             ? 'File selection and memory reads were observed, with no upload-like request.'
             : 'File activity was observed, but network activity prevents a clean local-only conclusion.',
@@ -420,6 +632,15 @@ function buildVerdict({ targetUrl, auditStartAt, auditStopAt, requests, fileEven
       detail: remoteWrites.length === 0
         ? 'No remote upload-like request was observed.'
         : `${remoteWrites.length} remote upload-like request(s) were observed.`,
+    },
+    {
+      key: 'thirdPartyLeakageRisk',
+      label: 'No suspicious high-risk third-party leakage',
+      status: highRiskLeakSuspects.length === 0 ? 'pass' : 'warn',
+      passed: highRiskLeakSuspects.length === 0,
+      detail: highRiskLeakSuspects.length === 0
+        ? 'No suspicious payload pattern to high-risk third-party domains was observed.'
+        : `${highRiskLeakSuspects.length} suspicious request(s) toward high-risk third-party domains were observed.`,
     },
   ];
 
@@ -462,6 +683,11 @@ function buildVerdict({ targetUrl, auditStartAt, auditStopAt, requests, fileEven
     }
   }
 
+  lines.push('', 'Observed Object URL And FormData Activity', '----------------------------------------');
+  lines.push(`createObjectURL events: ${fileSummary.objectUrls.length}`);
+  lines.push(`FormData append events: ${fileSummary.formDataWrites.length}`);
+  lines.push(`sendBeacon events: ${fileSummary.beacons.length}`);
+
   lines.push('', 'Observed Network Requests', '-------------------------');
   if (requestDetails.length === 0) {
     lines.push('No network request captured in the audit window.');
@@ -471,9 +697,13 @@ function buildVerdict({ targetUrl, auditStartAt, auditStopAt, requests, fileEven
       if (item.classification.isApiLike) tags.push('api');
       if (item.classification.isUploadLike) tags.push('upload-like');
       if (item.classification.isRemote) tags.push('remote');
+      if (item.classification.isHighRiskThirdPartyLeak) tags.push('high-risk-third-party');
       lines.push(`- ${item.method} ${shortUrl(item.url)}${tags.length ? ` [${tags.join(', ')}]` : ''}`);
       if (item.postDataSize > 0) lines.push(`  body: ${formatBytes(item.postDataSize)}`);
       if (item.postDataPreview) lines.push(`  preview: ${item.postDataPreview}`);
+      if (item.classification.payloadInsights?.hasSensitiveData) {
+        lines.push(`  sensitive-signals: ${item.classification.payloadInsights.signals.join(', ')}`);
+      }
     }
   }
 
@@ -502,6 +732,11 @@ class TrustAuditSession {
       label: options.label || '',
       slowMo: Number(options.slowMo || 0),
       keepBrowserOpen: Boolean(options.keepBrowserOpen),
+      ignoreFile: options.ignoreFile || null,
+      trustedThirdPartyDomains: normalizeDomainList(options.trustedThirdPartyDomains || []),
+      highRiskThirdPartyDomains: normalizeDomainList(
+        options.highRiskThirdPartyDomains || DEFAULT_HIGH_RISK_THIRD_PARTY_DOMAINS
+      ),
       recordVideo: typeof options.recordVideo === 'boolean'
         ? options.recordVideo
         : defaultRecordVideo({ headless: Boolean(options.headless) }),
@@ -523,9 +758,16 @@ class TrustAuditSession {
     this.captureIntervalMs = this.options.captureIntervalMs;
     this.captureActive = false;
     this.captureLoopPromise = null;
+    this.cdpSession = null;
+    this.webSocketUrlMap = new Map();
+    this.ignoreRules = loadIgnoreRules(this.options.ignoreFile);
     this.browserInfo = {
       executablePath: null,
       product: 'chrome',
+      trustedThirdPartyDomains: this.options.trustedThirdPartyDomains,
+      highRiskThirdPartyDomains: this.options.highRiskThirdPartyDomains,
+      ignoreRules: this.ignoreRules,
+      ignoreFileSource: this.ignoreRules._source,
     };
     this.state = 'idle';
   }
@@ -551,6 +793,47 @@ class TrustAuditSession {
     await this.page.exposeFunction('__trustCheckerRecordFileEvent', (payload) => {
       if (!this._inAuditWindow(Number(payload?.ts || Date.now()))) return;
       this.fileEvents.push(payload);
+      if (payload?.kind === 'send-beacon' && payload?.beaconUrl) {
+        let resolvedUrl = String(payload.beaconUrl || '');
+        try {
+          resolvedUrl = new URL(String(payload.beaconUrl || ''), String(payload.pageUrl || this.options.targetUrl)).toString();
+        } catch (_) {}
+        const bodyPreview = sanitizeBodyPreview(payload.bodyPreview || null);
+        this.requests.push({
+          id: ++this.requestCounter,
+          ts: Number(payload.ts || Date.now()),
+          url: resolvedUrl,
+          method: 'BEACON',
+          resourceType: 'beacon',
+          headers: {},
+          postDataSize: Number(payload.bodySize || 0),
+          postDataPreview: bodyPreview,
+          postDataSample: typeof payload.bodyPreview === 'string' ? payload.bodyPreview.slice(0, 8192) : '',
+        });
+      }
+    });
+    this.cdpSession = await this.page.target().createCDPSession();
+    await this.cdpSession.send('Network.enable');
+    this.cdpSession.on('Network.webSocketCreated', (event) => {
+      this.webSocketUrlMap.set(event.requestId, event.url || '');
+    });
+    this.cdpSession.on('Network.webSocketFrameSent', (event) => {
+      const ts = Date.now();
+      if (!this._inAuditWindow(ts)) return;
+      const payloadData = String(event?.response?.payloadData || '');
+      const preview = sanitizeBodyPreview(payloadData);
+      const url = this.webSocketUrlMap.get(event.requestId) || 'ws://unknown';
+      this.requests.push({
+        id: ++this.requestCounter,
+        ts,
+        url,
+        method: 'WS-SEND',
+        resourceType: 'websocket-frame',
+        headers: {},
+        postDataSize: Buffer.byteLength(payloadData || '', 'utf8'),
+        postDataPreview: preview,
+        postDataSample: payloadData.slice(0, 8192),
+      });
     });
     await this.page.evaluateOnNewDocument(INSTRUMENTATION_SOURCE);
     this.page.on('request', (request) => {
@@ -566,6 +849,7 @@ class TrustAuditSession {
         headers: request.headers(),
         postDataSize: postData ? Buffer.byteLength(postData, 'utf8') : 0,
         postDataPreview: sanitizeBodyPreview(postData),
+        postDataSample: typeof postData === 'string' ? postData.slice(0, 8192) : '',
       };
       this.requests.push(record);
     });
@@ -637,6 +921,11 @@ class TrustAuditSession {
       auditStopAt: this.auditStopAt,
       videoPath: this.videoPath,
       checks: verdict.checks,
+      policy: {
+        trustedThirdPartyDomains: this.options.trustedThirdPartyDomains,
+        highRiskThirdPartyDomains: this.options.highRiskThirdPartyDomains,
+        ignoreFileSource: this.ignoreRules._source,
+      },
     }, null, 2));
     fs.writeFileSync(path.join(this.outputDir, 'audit-report.txt'), verdict.text);
     this.state = 'finished';
@@ -652,6 +941,12 @@ class TrustAuditSession {
   }
 
   async close() {
+    if (this.cdpSession) {
+      try {
+        await this.cdpSession.detach();
+      } catch (_) {}
+    }
+    this.cdpSession = null;
     if (this.browser && !this.options.keepBrowserOpen) {
       await this.browser.close();
     }
@@ -743,10 +1038,13 @@ module.exports = {
   VERSION,
   DEFAULT_TARGET_URL,
   DEFAULT_OUTPUT_ROOT,
+  DEFAULT_IGNORE_FILE_PATH,
   TrustAuditSession,
   buildVerdict,
   checkTag,
   classifyRequest,
+  loadIgnoreRules,
+  mergeIgnoreRules,
   detectChromeExecutable,
   detectFfmpegExecutable,
   formatBytes,

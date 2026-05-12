@@ -1,6 +1,6 @@
 # Trust Checker
 
-Trust Checker is a small, open-source verification tool for auditing whether QingxiFlow processes files locally in the browser without uploading raw file data to a backend.
+Trust Checker is a small, open-source verification tool for auditing whether QX Flow processes files locally in the browser without uploading raw file data to a backend.
 
 It is intentionally narrow:
 
@@ -41,7 +41,7 @@ From this `Trust_Checker` directory:
 npm install
 ```
 
-This standalone package has its own `package.json`. If you publish Trust Checker separately, keep its runtime dependencies and its `package-lock.json` in this folder, instead of depending on the main QingxiFlow webapp package manifest.
+This standalone package has its own `package.json`. If you publish Trust Checker separately, keep its runtime dependencies and its `package-lock.json` in this folder, instead of depending on the main QX Flow webapp package manifest.
 
 `puppeteer-core` is used as the browser controller. Trust Checker auto-detects Chrome or Chromium on macOS, Windows and Linux. If auto-detection fails, pass the browser path explicitly with `--chromePath` or set `TRUST_CHECKER_CHROME_PATH`.
 
@@ -56,7 +56,7 @@ npm run trust:checker -- --url https://qingxiflow.com/app
 Flow:
 
 1. Trust Checker opens the target page in Chrome and starts the audit window immediately by default.
-2. Upload a file and process it in QingxiFlow.
+2. Upload a file and process it in QX Flow.
 3. Press Enter to stop the audit and write the report.
 
 If you still want the old prepare-then-start flow for sign-in or setup, add `--manualStart`.
@@ -67,7 +67,9 @@ Useful flags:
   node "./trust-checker.js" \
   --url https://www.qingxiflow.com/app \
   --outputRoot "./artifacts" \
-  --chromePath "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  --chromePath "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --trustedDomains "fonts.gstatic.com,fonts.googleapis.com" \
+  --highRiskDomains "sentry.io,google-analytics.com"
 ```
 
 If you want video on macOS anyway:
@@ -93,10 +95,20 @@ This starts a local control panel at `http://127.0.0.1:3399` and opens it in you
 Flow:
 
 1. Click `Start Audit`.
-2. Trust Checker launches QingxiFlow in Chrome and starts monitoring immediately.
+2. Trust Checker launches QX Flow in Chrome and starts monitoring immediately.
 3. Upload a file and process it in the launched browser.
 4. Return to the control panel and click `Stop Audit`.
 5. Open the generated artifact folder for the report and evidence files.
+
+### 4. Optional static pre-scan
+
+Before dynamic audit, you can quickly scan built assets for network-related calls:
+
+```bash
+npm run trust:checker:static-scan -- dist artifacts
+```
+
+This writes a report under `artifacts/static-scan-<timestamp>/static-scan.txt`.
 
 ## How The Verdict Is Computed
 
@@ -105,9 +117,13 @@ Trust Checker does not rely on marketing copy or privacy-policy text. It builds 
 ### Pass criteria
 
 - `No data upload detected`: no upload-like request body and no POST/PUT/PATCH/DELETE request seen in the audit window
-- `No API calls during file processing`: no XHR, fetch, websocket or `/api/` request seen in the audit window
+- `No API calls during file processing`: no untrusted cross-origin data-channel request (XHR/fetch/websocket/beacon/long-query/write methods) seen after file selection
 - `File only processed in browser memory`: a file-selection event and at least one FileReader or Blob memory-read event are observed, with no upload-like request
 - `No data stored on cloud`: no remote upload-like request is observed
+
+Additional warning checks:
+
+- `No suspicious high-risk third-party leakage`: warns when requests to high-risk domains (for example analytics or error tracking) include larger payloads, long query strings, beacon traffic, or websocket sends.
 
 ### Important boundary
 
@@ -118,7 +134,7 @@ If one evidence point cannot be proven from the captured hooks, Trust Checker re
 ## Recommended Audit Procedure
 
 1. Start from a clean browser session.
-2. Open QingxiFlow and finish any login steps before arming the audit window when using CLI mode.
+2. Open QX Flow and finish any login steps before arming the audit window when using CLI mode.
 3. Start the audit.
 4. Upload a representative CSV, JSON or Excel file.
 5. Apply one or more rules.
@@ -161,8 +177,8 @@ npm run trust:checker:release -- \
 
 Generated output:
 
-- `dist/QingxiFlowTrustChecker-portable-.../`
-- `dist/QingxiFlowTrustChecker-portable-....zip`
+- `dist/QXFlowTrustChecker-portable-.../`
+- `dist/QXFlowTrustChecker-portable-....zip`
 - launchers for macOS, Linux and Windows
 
 Non-technical users can start the GUI by double-clicking `Launch Trust Checker.command` on macOS or the matching launcher for their OS.
@@ -172,11 +188,11 @@ Non-technical users can start the GUI by double-clicking `Launch Trust Checker.c
 - The browser recording captures the browser page, not the native operating-system file chooser.
 - If `ffmpeg` is not available, Trust Checker still saves raw video frames and all JSON or text evidence.
 - This tool can prove what the browser did during the observed audit window. It does not prove what happened outside that window.
-- If you audit the public production site, same-origin QingxiFlow control-plane requests are recorded as evidence but do not automatically count as file upload failures.
+- If you audit the public production site, same-origin QX Flow control-plane requests are recorded as evidence but do not automatically count as file upload failures.
 
 ## Current Version
 
 - Version: `0.1.0`
 - Core stack: `Node.js + Puppeteer Core + ffmpeg`
-- External naming: `QingxiFlow` in English,domain `qingxiflow.com`
+- External naming: `QX Flow` in English,domain `qingxiflow.com`
 - Scope: local audit evidence, not full endpoint reverse engineering

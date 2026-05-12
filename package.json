@@ -1,16 +1,17 @@
 {
-  "name": "qingxiflow-trust-checker",
+  "name": "QXFlow-trust-checker",
   "version": "0.1.0",
-  "description": "Standalone audit tool for verifying QingxiFlow file processing behavior in the browser.",
+  "description": "Standalone audit tool for verifying QX Flow file processing behavior in the browser.",
   "private": true,
   "bin": {
-    "qingxiflow-trust-checker": "./trust-checker.js",
-    "qingxiflow-trust-checker-gui": "./trust-checker-gui.js"
+    "QXflow-trust-checker": "./trust-checker.js",
+    "QXflow-trust-checker-gui": "./trust-checker-gui.js"
   },
   "scripts": {
     "trust:checker": "node ./trust-checker.js",
     "trust:checker:gui": "node ./trust-checker-gui.js",
-    "trust:checker:release": "node ./build-release.js"
+    "trust:checker:release": "node ./build-release.js",
+    "trust:checker:static-scan": "./static-scan.sh"
   },
   "files": [
     "./trust-checker-core.js",

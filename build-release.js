@@ -18,7 +18,7 @@ const args = minimist(process.argv.slice(2), {
   string: ['name', 'outDir', 'zipPath', 'targetUrl', 'chromePath', 'ffmpegPath', 'port'],
   boolean: ['zip', 'copyNodeModules', 'copyChrome', 'copyFfmpeg', 'help'],
   default: {
-    name: `QingxiFlowTrustChecker-portable-${process.platform}-${process.arch}`,
+    name: `QXFlowTrustChecker-portable-${process.platform}-${process.arch}`,
     zip: true,
     copyNodeModules: true,
     copyChrome: true,
@@ -29,7 +29,7 @@ const args = minimist(process.argv.slice(2), {
 });
 
 function printHelp() {
-  console.log(`QingxiFlow Trust Checker release builder
+  console.log(`QX Flow Trust Checker release builder
 
 Usage:
   npm run trust:checker:release
@@ -185,7 +185,7 @@ cd /d "%ROOT%"
 
 function writeReleaseReadme(releaseDir, options) {
   const lines = [
-    'QingxiFlow Trust Checker Portable Release',
+    'QX Flow Trust Checker Portable Release',
     '=========================================',
     '',
     'Use one of the launchers in this folder to start the GUI.',
