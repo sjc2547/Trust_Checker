@@ -512,13 +512,13 @@ function classifyRequest(item, targetOrigin, policy = {}) {
     ['POST', 'PUT', 'PATCH', 'DELETE', 'CONNECT', 'BEACON', 'WS-SEND'].includes(method) ||
     hasBody ||
     queryLength >= 256;
-  const isApiLike = !isIgnoredLocalApi && (
+  const isApiLike = !isIgnoredLocalApi && !isTrustedThirdParty && (
     isApiEndpoint ||
     isRealtime ||
     isBeacon ||
-    (isExternal && !isTrustedThirdParty && isPotentialDataChannel)
+    (isExternal && isPotentialDataChannel)
   );
-  const isUploadLike = !isIgnoredLocalApi && (
+  const isUploadLike = !isIgnoredLocalApi && !isTrustedThirdParty && (
     hasUploadContentType ||
     (isRemote && ['POST', 'PUT', 'PATCH', 'DELETE', 'CONNECT', 'BEACON'].includes(method) && (hasBody || hasLargeBody)) ||
     (method === 'WS-SEND' && hasBody) ||

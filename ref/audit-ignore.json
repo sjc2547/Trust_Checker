@@ -50,9 +50,7 @@
   "trustedThirdPartyDomains": [
     "fonts.googleapis.com",
     "fonts.gstatic.com",
-    "embed.tawk.to",
-    "va.tawk.to",
-    "vsb76.tawk.to",
+    "tawk.to",
     "cdn.jsdelivr.net"
   ],
 
